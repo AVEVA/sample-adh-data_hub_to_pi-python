@@ -5,13 +5,12 @@ from enum import Enum
 from queue import Queue
 import traceback
 import threading
-import requests
 import datetime
 import json
-import gzip
 import time
 
 from adh_sample_library_preview import (ADHClient, SdsType, SdsStream)
+from PIOMFClient import (PIOMFClient, OMFMessageAction, OMFMessageType)
 
 
 class Mode(Enum):
@@ -26,7 +25,6 @@ max_events = 5000
 data_request_period = 5
 mode = Mode.BACKFILL_N_DAYS
 days_to_backfill = 7
-session = requests.Session()
 
 type_code_format = {
     3: None,
@@ -97,39 +95,8 @@ def getAppsettings():
     return appsettings
 
 
-def sendOMFToPI(session, omf_endpoint, username, password, message_type, message_omf_json, action='create'):
-
-    msg_body = gzip.compress(bytes(json.dumps(message_omf_json), 'utf-8'))
-    msg_headers = {
-        'messagetype': message_type,
-        'action': action,
-        'messageformat': 'JSON',
-        'omfversion': '1.2',
-        'compression': 'gzip',
-        'x-requested-with': 'xmlhttprequest'
-    }
-
-    response = session.post(
-        omf_endpoint,
-        headers=msg_headers,
-        data=msg_body,
-        verify=False,
-        timeout=10000,
-        auth=(username, password)
-    )
-
-    # response code in 200s if the request was successful!
-    if response.status_code < 200 or response.status_code >= 300:
-        print(msg_headers)
-        response.close()
-        print(
-            f'Response from relay was bad. {message_type} message: {response.status_code} {response.text}.  Message holdings: {message_omf_json}')
-        print()
-        raise Exception(
-            f'OMF message was unsuccessful, {message_type}. {response.status_code}:{response.text}')
-
-
 def removeDuplicates(list):
+    """Remove Duplicate entries from a list based on Ids"""
 
     id_set = set()
     reduced_list = []
@@ -142,6 +109,8 @@ def removeDuplicates(list):
 
 
 def convertType(type: SdsType):
+    """Convert an SdsType into an OMF Type"""
+
     omf_type = {
         'id': type.Id,
         'name': type.Name,
@@ -176,6 +145,8 @@ def convertType(type: SdsType):
 
 
 def convertContainer(stream: SdsStream):
+    """Convert an SdsStream into an OMF Container"""
+
     return {
         'id': stream.Id,
         'name': stream.Name,
@@ -186,6 +157,8 @@ def convertContainer(stream: SdsStream):
 
 
 def convertData(container_id, data):
+    """Convert an Sds data event into an OMF data message"""
+
     if isinstance(data, list):
         return {
             "containerid": container_id,
@@ -199,6 +172,8 @@ def convertData(container_id, data):
 
 
 def queueStreamData(queue, stream, type_index, namespace_id, sds_client, start_index, end_index):
+    """Query for data from a stream and add it to the queue"""
+
     if start_index is None:
         return None
 
@@ -206,7 +181,7 @@ def queueStreamData(queue, stream, type_index, namespace_id, sds_client, start_i
     try:
         results_page = sds_client.Streams.getWindowValuesPaged(
             namespace_id, stream.Id, value_class=None, start=start_index, end=end_index, count=250000)
-        
+
         for result in results_page.Results:
             if result[type_index] != start_index:
                 queue.put(convertData(stream.Id, result))
@@ -217,7 +192,7 @@ def queueStreamData(queue, stream, type_index, namespace_id, sds_client, start_i
         while not results_page.end():
             results_page = sds_client.Streams.getWindowValuesPaged(
                 namespace_id, stream.Id, value_class=None, start=start_index, end=end_index, count=250000, continuation_token=results_page.ContinuationToken)
-            
+
             for result in results_page.Results:
                 queue.put(convertData(stream.Id, result))
 
@@ -234,6 +209,8 @@ def queueStreamData(queue, stream, type_index, namespace_id, sds_client, start_i
 
 
 def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace_id: str, streams: list[SdsStream]):
+    """Task for retrieving data from Data Hub and adding it to the queue"""
+
     # get the start index and type index for each stream
     start_indexes = []
     type_indexes = []
@@ -242,7 +219,7 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
     for stream in streams:
         type = sds_client.Types.getType(namespace_id, stream.TypeId)
         for property in type.Properties:
-            #if property.IsKey:
+            # if property.IsKey:
             type_indexes.append(property.Id)
 
     if mode == Mode.BACKFILL_ALL:
@@ -278,8 +255,11 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
         time.sleep(data_request_period)
 
 
-def dataSendingTask(queue: Queue, session: requests.Session, omf_endpoint, pi_appsettings):
+def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient):
+    """Task for getting data from the queue and sending it to PI"""
+
     timer = time.time()
+    event_count = 0
 
     while True:
         if time.time() - timer > send_period or queue.qsize() >= max_events:
@@ -289,24 +269,29 @@ def dataSendingTask(queue: Queue, session: requests.Session, omf_endpoint, pi_ap
                 if (queue.empty()):
                     break
                 data.append(queue.get())
+            event_count = len(data)
 
             # consolidate list by container id
             consolidated_data = []
             container_dictionary = {}
             for datum in data:
                 if datum.get('containerid') in container_dictionary:
-                    container_dictionary[datum.get('containerid')] += datum.get('values')
+                    container_dictionary[datum.get(
+                        'containerid')] += datum.get('values')
                 else:
-                    container_dictionary[datum.get('containerid')] = datum.get('values')
+                    container_dictionary[datum.get(
+                        'containerid')] = datum.get('values')
 
-            for k,v in container_dictionary.items():
-                consolidated_data.append({'containerid': k, 'values': v})                   
+            for k, v in container_dictionary.items():
+                consolidated_data.append({'containerid': k, 'values': v})
 
             # Send events
             while data != []:
                 try:
-                    sendOMFToPI(session, omf_endpoint, pi_appsettings.get(
-                        'Username'), pi_appsettings.get('Password'), 'data', data, action='update')
+                    response = pi_omf_client.omfRequest(
+                        OMFMessageType.Data, OMFMessageAction.Update, data)
+                    pi_omf_client.checkResponse(
+                        response, 'Error updating data')
                     data = []
                 except Exception as ex:
                     print((f"Encountered Error: {ex}"))
@@ -315,6 +300,7 @@ def dataSendingTask(queue: Queue, session: requests.Session, omf_endpoint, pi_ap
                     print
 
             # Reset timer and data
+            print(f'Queue size: {queue.qsize()}, Events/second: {event_count/(time.time()-timer)}')
             timer = time.time()
 
             print(queue.qsize())
@@ -330,11 +316,19 @@ if __name__ == "__main__":
     pi_appsettings = appsettings.get('PI')
     queries = appsettings.get('Queries')
 
-    # Construct OMF endpoint URL
-    omf_endpoint = f'{pi_appsettings.get("Resource")}/omf'
+    # Create PI OMF client
+    print('Creating a PI OMF client...')
+    pi_omf_client = PIOMFClient(
+        pi_appsettings.get('Resource'),
+        pi_appsettings.get('DataArchiveName'),
+        pi_appsettings.get('Username'),
+        pi_appsettings.get('Password'),
+        pi_appsettings.get('OMFVersion', '1.2'),
+        pi_appsettings.get('VerifySSL', True)
+    )
 
-    # Create a data hub client
-    print('Creating a data hub client...')
+    # Create a Data Hub client
+    print('Creating a Data Hub client...')
     sds_client = ADHClient(
         data_hub_appsettings.get('ApiVersion'),
         data_hub_appsettings.get('TenantId'),
@@ -346,10 +340,15 @@ if __name__ == "__main__":
     # Collect a list of streams to transfer
     print('Collecting a list of streams to transfer...')
     streams = []
-    # TODO: account for paging
     for query in queries:
-        streams += sds_client.Streams.getStreams(
-            namespace_id, query.get('Value'))
+        streams_result = sds_client.Streams.getStreams(
+            namespace_id, query.get('Value'), count=1)
+        i = 1
+        while streams_result != []:
+            streams += streams_result
+            streams_result = sds_client.Streams.getStreams(
+                namespace_id, query.get('Value'), skip=1*i, count=1)
+            i += 1
 
     streams = removeDuplicates(streams)
 
@@ -367,8 +366,9 @@ if __name__ == "__main__":
         types.append(convertType(
             sds_client.Types.getType(namespace_id, type_id)))
 
-    sendOMFToPI(session, omf_endpoint, pi_appsettings.get('Username'),
-                pi_appsettings.get('Password'), 'type', types, action='create')
+    response = pi_omf_client.omfRequest(
+        OMFMessageType.Type, OMFMessageAction.Create, types)
+    pi_omf_client.checkResponse(response, 'Error creating types')
 
     # Create containers
     print('Creating containers...')
@@ -376,8 +376,9 @@ if __name__ == "__main__":
     for stream in streams:
         containers.append(convertContainer(stream))
 
-    sendOMFToPI(session, omf_endpoint, pi_appsettings.get('Username'), pi_appsettings.get(
-        'Password'), 'container', containers, action='create')
+    response = pi_omf_client.omfRequest(
+        OMFMessageType.Container, OMFMessageAction.Create, containers)
+    pi_omf_client.checkResponse(response, 'Error creating containers')
 
     # Continuously send data
     print('Sending data...')
@@ -385,7 +386,7 @@ if __name__ == "__main__":
     t1 = threading.Thread(target=dataRetrievalTask, args=(
         queue, mode, sds_client, namespace_id, streams,))
     t2 = threading.Thread(target=dataSendingTask, args=(
-        queue, session, omf_endpoint, pi_appsettings,))
+        queue, pi_omf_client))
     t1.start()
     t2.start()
     t1.join()
