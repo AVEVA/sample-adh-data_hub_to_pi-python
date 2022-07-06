@@ -145,13 +145,13 @@ def convertType(type: SdsType, prefix: str):
     return omf_type
 
 
-def convertContainer(stream: SdsResolvedStream):
+def convertContainer(stream: SdsResolvedStream, prefix: str):
     """Convert an SdsStream into an OMF Container"""
 
     return {
-        'id': f'{stream.Prefix}_{stream.Id}',
+        'id': f'{prefix}_{stream.Id}',
         'name': stream.Name,
-        'typeid': f'{stream.Prefix}_{stream.Type.Id}',
+        'typeid': f'{prefix}_{stream.Type.Id}',
         'description': stream.Description,
         'datasource': 'Data Hub'
     }
@@ -219,7 +219,7 @@ def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_
     return (new_start_index, start_boundary)
 
 
-def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace_id: str, community_id: str, resolved_streams: list[SdsResolvedStream]):
+def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace_id: str, community_id: str, resolved_streams: list[SdsResolvedStream], test: bool):
     """Task for retrieving data from Data Hub and adding it to the queue"""
 
     start_indexes = []
@@ -251,7 +251,8 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
                 (datetime.datetime.utcnow()).isoformat() + 'Z')
 
     # Retrieve data and add to queue forever
-    while True:
+    count = 0
+    while (not test) or (count == 0):
 
         results = []
         with ThreadPoolExecutor() as pool:
@@ -263,15 +264,16 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
             start_boundaries[index] = result[1]
 
         time.sleep(data_request_period)
+        count += 1
 
 
-def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient):
+def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
     """Task for getting data from the queue and sending it to PI"""
 
     timer = time.time()
     event_count = 0
 
-    while True:
+    while (not test) or (queue.qsize() > 0 or event_count == 0):
         if time.time() - timer > send_period or queue.qsize() >= max_events:
             # Read data from queue
             data = []
@@ -317,7 +319,7 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient):
             timer = time.time()
 
 
-if __name__ == "__main__":
+def main(test=False):
     print('Starting!')
 
     # Read appsettings
@@ -389,8 +391,7 @@ if __name__ == "__main__":
                     resolved_stream = sds_client.Streams.getResolvedStream(
                         namespace_id, stream.Id)
                     # Create prefix to avoid collisions
-                    namespace = [n for n in namespaces if n.Id ==
-                                 data_hub_appsettings.get("NamespaceId")]
+                    namespace = [n for n in namespaces if n.Id == namespace_id]
                     resolved_stream.Prefix = f'{namespace[0].Description}'
                     resolved_streams.append(resolved_stream)
                 streams_result = sds_client.Streams.getStreams(
@@ -418,7 +419,7 @@ if __name__ == "__main__":
     print('Creating containers...')
     containers = []
     for resolved_stream in resolved_streams:
-        containers.append(convertContainer(resolved_stream))
+        containers.append(convertContainer(resolved_stream, resolved_stream.Prefix))
 
     response = pi_omf_client.omfRequest(
         OMFMessageType.Container, OMFMessageAction.Create, containers)
@@ -428,10 +429,13 @@ if __name__ == "__main__":
     print('Sending data...')
     queue = Queue(maxsize=0)
     t1 = threading.Thread(target=dataRetrievalTask, args=(
-        queue, mode, sds_client, namespace_id, community_id, resolved_streams))
+        queue, mode, sds_client, namespace_id, community_id, resolved_streams, test))
     t2 = threading.Thread(target=dataSendingTask, args=(
-        queue, pi_omf_client))
+        queue, pi_omf_client, test))
     t1.start()
     t2.start()
     t1.join()
     t2.join()
+
+if __name__ == "__main__":
+    main()
