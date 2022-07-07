@@ -15,7 +15,7 @@ Developed against Python 3.9.1.
 
 This sample uses REST API calls to the Sequential Data Store of AVEVA Data Hub to collect Types, Streams, and data and create corresponding PI Tags in a Data Archive. The sample uses the architecture outlined below where data is feed into a queue from a data retrieval task and events are read from the queue by the send task to be sent to the PI Data Archive. Within the retrieval task, individual threads are spun up to parallelize data retrieval, improving performance. Within the send task, data is batched together from any number of streams and sent when there are more than 5000 events to be sent or more than 30 seconds has elapsed. This ensures that data is sent in order and is more performant than continuously sending data.
 
-![data_hub_to_pi_architecture.png](./images/data_hub_to_pi_architecture.png)
+![Architecture Diagram](../images/data_hub_to_pi_architecture.png)
 
 ## Configuring the sample
 
