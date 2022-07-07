@@ -172,7 +172,7 @@ def convertData(container_id, data):
         }
 
 
-def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_id, sds_client: ADHClient, start_index, end_index, start_boundary):
+def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_id, sds_client: ADHClient, start_index, end_index, start_boundary, test):
     """Query for data from a stream and add it to the queue"""
 
     if start_index is None:
@@ -215,6 +215,8 @@ def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_
         print
         traceback.print_exc()
         print
+        if test:
+            raise ex
 
     return (new_start_index, start_boundary)
 
@@ -257,7 +259,7 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
         results = []
         with ThreadPoolExecutor() as pool:
             results = pool.map(queueStreamData, repeat(queue), resolved_streams, type_indexes, repeat(namespace_id), repeat(community_id), repeat(
-                sds_client), start_indexes, repeat(datetime.datetime.utcnow().isoformat() + 'Z'), start_boundaries)
+                sds_client), start_indexes, repeat(datetime.datetime.utcnow().isoformat() + 'Z'), start_boundaries, repeat(test))
 
         for index, result in enumerate(results):
             start_indexes[index] = result[0]
@@ -311,6 +313,8 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
                     print
                     traceback.print_exc()
                     print
+                    if test:
+                        raise ex
 
             print(
                 f'Queue size: {queue.qsize()}, Events/second: {event_count/(time.time()-timer)}')

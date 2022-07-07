@@ -31,20 +31,49 @@ resources:
 variables:
   - template: '/miscellaneous/build_templates/variables.yml@templates'
   - name: analysisProject
-    value: SDS_Python
+    value: sample-adh-data_hub_to_pi-python
 
 jobs:
-  - job: Tests_ADH
+  - job: Tests
+    strategy:
+      maxParallel: 1
+      matrix:
+        linux:
+          agentOS: Linux
+        windows:
+          agentOS: Windows_NT
     pool:
       name: 00-OSIManaged-Containers
-      demands: Agent.OS -equals Linux
+      demands: Agent.OS -equals $(agentOS)
+    variables:
+      - name: DataHub.TenantId
+        value: $(TenantId)
+      - name: DataHub.NamespaceId
+        value: $(NamespaceId)
+      - name: DataHub.ClientId
+        value: $(ClientId)
+      - name: DataHub.ClientSecret
+        value: $(ClientSecret)
+      - name: DataHub.Resource
+        value: $(Resource)
+      - name: PI.Resource
+        value: $(PIWebAPI)
+      - name: PI.Username
+        value: $(Username)
+      - name: PI.Password
+        value: $(Password)
+      - name: PI.DataArchiveName
+        value: $(DataArchiveName)
+      - name: PI.VerifySSL
+        value: false
+
     steps:
       - template: '/miscellaneous/build_templates/appsettings.yml@templates'
         parameters:
-          secrets: 'TenantId, NamespaceId, CommunityId, ClientId, ClientSecret, Resource'
+          secrets: 'TenantId, NamespaceId, ClientId, ClientSecret, Resource, Username, Password, PIWebAPI, DataArchiveName'
 
       - script: |
-          echo Install test tools   
+          echo Install test tools  
           pip install pytest
           echo Install requirements
           pip install -r requirements.txt
@@ -58,40 +87,6 @@ jobs:
           testResultsFiles: '**/test-*.xml'
           failTaskOnFailedTests: true
           testRunTitle: '$(Agent.JobName) on $(Agent.OS)'
-        displayName: 'Publish test results'
-        condition: always()
-
-  - job: Tests_EDS
-    pool:
-      name: 00-OSIManaged-Build
-      demands: PYTHON
-    variables:
-      - name: TenantId
-        value: default
-      - name: NamespaceId
-        value: default
-      - name: CommunityId
-        value: null
-      - name: Resource
-        value: http://localhost:5590
-    steps:
-      - template: '/miscellaneous/build_templates/appsettings.yml@templates'
-
-      - bash: |
-          echo Install test tools
-          pip install pytest
-          echo Install requirements
-          pip install -r requirements.txt
-          echo Run tests
-          python -m pytest --junitxml=junit/test-results.xml ./test.py
-          echo Complete
-        displayName: 'Run tests'
-
-      - task: PublishTestResults@2
-        inputs:
-          testResultsFiles: '**/test-*.xml'
-          failTaskOnFailedTests: true
-          testRunTitle: '$(Agent.JobName) on $(imageName)'
         displayName: 'Publish test results'
         condition: always()
 
