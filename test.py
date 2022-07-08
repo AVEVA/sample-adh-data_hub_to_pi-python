@@ -8,7 +8,7 @@ from PIOMFClient import OMFMessageAction, OMFMessageType, PIOMFClient
 from program import main, getAppsettings, convertType, convertContainer
 
 
-class SampleE2ETest(unittest.TestCase):
+class SampleE2ETests(unittest.TestCase):
 
     @classmethod
     def test_main(cls):
