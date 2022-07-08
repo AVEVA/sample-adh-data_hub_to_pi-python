@@ -66,6 +66,10 @@ jobs:
         value: $(DataArchiveName)
       - name: PI.VerifySSL
         value: false
+      - name: Queries.0.Value
+        value: 'Id:DataHubToPIStream'
+      - name: Queries.1.Value
+        value: 'Id:TestNeverMatch'
 
     steps:
       - template: '/miscellaneous/build_templates/appsettings.yml@templates'
