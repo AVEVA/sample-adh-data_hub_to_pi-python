@@ -22,7 +22,7 @@ This sample uses REST API calls to the Sequential Data Store of AVEVA Data Hub t
 
 The sample is configured by modifying the file [appsettings.placeholder.json](appsettings.placeholder.json). Details on how to configure it can be found in the sections below. Before editing appsettings.placeholder.json, rename this file to `appsettings.json`. This repository's `.gitignore` rules should prevent the file from ever being checked in to any fork or branch, to ensure credentials are not compromised.
 
-There are some PI Point settings that cannot be configured programatically through OMF, but may be desireable. Compression for example is enabled by default on most PI Data Archives, which may or may not be desireable. To modify a PI Point's configuration, first run the sample until the new PI Points have been created and then modify then use either in PI System Management Tools or using PI Builder in Excel.
+There are some PI Point settings that cannot be configured programatically through OMF, but may be desireable. Compression for example is enabled by default on most PI Data Archives so not all data will be archived by default. To modify a PI Point's configuration, first run the sample until the new PI Points have been created and then modify then use either in PI System Management Tools or using PI Builder in Excel.
 
 ### Configuring appsettings.json
 
