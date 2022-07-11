@@ -62,8 +62,6 @@ jobs:
         value: $(Username)
       - name: PI.Password
         value: $(Password)
-      - name: PI.DataArchiveName
-        value: $(DataArchiveName)
       - name: PI.VerifySSL
         value: false
       - name: Queries.0.Value
@@ -74,7 +72,7 @@ jobs:
     steps:
       - template: '/miscellaneous/build_templates/appsettings.yml@templates'
         parameters:
-          secrets: 'TenantId, NamespaceId, ClientId, ClientSecret, Resource, Username, Password, PIWebAPI, DataArchiveName'
+          secrets: 'TenantId, NamespaceId, ClientId, ClientSecret, Resource, Username, Password, PIWebAPI'
 
       - script: |
           echo Install test tools  
