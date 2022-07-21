@@ -94,11 +94,12 @@ class PIOMFClient(object):
         """
         return self.__omf_endpoint
 
-    def checkResponse(self, response, main_message: str):
+    def verifySuccessfulResponse(self, response, main_message: str, throw_on_bad: bool = True):
         """
-        Base OMF request function
+        Verifies that a response was successful and optionally throws an exception on a bad response
         :param response: Http response
         :param main_message: Message to print in addition to response information
+        :param throw_on_bad: Optional parameter to throw an exception on a bad response
         """
 
         # response code in 200s if the request was successful!

@@ -1,16 +1,18 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
-from itertools import repeat
 from enum import Enum
+from itertools import repeat
 from queue import Queue
-import traceback
-import threading
+from typing import Any
 import datetime
 import json
+import threading
 import time
+import traceback
 
 from adh_sample_library_preview import (
-    ADHClient, SdsResolvedStream, SdsType, SdsBoundaryType)
+    ADHClient, Namespace, SdsBoundaryType, SdsResultPage, SdsType)
+from CustomResolvedStream import CustomResolvedStream
 from PIOMFClient import (PIOMFClient, OMFMessageAction, OMFMessageType)
 
 
@@ -26,6 +28,9 @@ max_events = 5000
 data_request_period = 5
 mode = Mode.BACKFILL_N_DAYS
 days_to_backfill = 7
+max_send_retries = -1
+retries_before_throttle = 3
+max_throttle_time = 60
 
 type_code_format = {
     3: None,
@@ -96,7 +101,7 @@ def getAppsettings():
     return appsettings
 
 
-def removeDuplicates(list):
+def removeDuplicates(list: list[Any]):
     """Remove Duplicate entries from a list based on Ids"""
 
     id_set = set()
@@ -145,7 +150,7 @@ def convertType(type: SdsType, prefix: str):
     return omf_type
 
 
-def convertContainer(stream: SdsResolvedStream, prefix: str):
+def convertContainer(stream: CustomResolvedStream, prefix: str):
     """Convert an SdsStream into an OMF Container"""
 
     return {
@@ -157,7 +162,7 @@ def convertContainer(stream: SdsResolvedStream, prefix: str):
     }
 
 
-def convertData(container_id, data):
+def convertData(container_id: str, data: Any):
     """Convert an Sds data event into an OMF data message"""
 
     if isinstance(data, list):
@@ -172,7 +177,78 @@ def convertData(container_id, data):
         }
 
 
-def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_id, sds_client: ADHClient, start_index, end_index, start_boundary, test):
+def getResolvedStreams(sds_client: ADHClient, query: str, namespace_id: str = None, namespaces: list[Namespace] = None, community_id: str = None, count_per_page: int = 100) -> list[CustomResolvedStream]:
+    """Helper function for getting a list of resolved streams from a query"""
+    resolved_streams = []
+
+    if community_id:
+        streams_result = sds_client.Communities.getCommunityStreams(
+            community_id, query.get('Value'), count=count_per_page)
+        i = 1
+        while streams_result != []:
+            for stream_search_result in streams_result:
+                resolved_stream = sds_client.SharedStreams.getResolvedStream(
+                    stream_search_result.TenantId, stream_search_result.NamespaceId, stream_search_result.CommunityId, stream_search_result.Id)
+                resolved_stream = CustomResolvedStream.fromResolvedStream(
+                    resolved_stream)
+
+                # Append extra properties to stream that will be used later
+                resolved_stream.TenantId = stream_search_result.TenantId
+                resolved_stream.TenantName = stream_search_result.TenantName
+                resolved_stream.NamespaceId = stream_search_result.NamespaceId
+                resolved_stream.CommunityId = stream_search_result.CommunityId
+                for property in resolved_stream.Type.Properties:
+                    if property.IsKey:
+                        resolved_stream.IndexId = property.Id
+
+                # Create prefix to avoid collisions
+                resolved_stream.Prefix = f'{stream_search_result.TenantName}'
+                resolved_streams.append(resolved_stream)
+            streams_result = sds_client.Communities.getCommunityStreams(
+                community_id, query.get('Value'), skip=count_per_page*i, count=count_per_page)
+            i += 1
+    else:
+        streams_result = sds_client.Streams.getStreams(
+            namespace_id, query.get('Value'), count=count_per_page)
+        i = 1
+        while streams_result != []:
+            for stream in streams_result:
+                resolved_stream = sds_client.Streams.getResolvedStream(
+                    namespace_id, stream.Id)
+                resolved_stream = CustomResolvedStream.fromResolvedStream(
+                    resolved_stream)
+
+                # Append extra properties to stream that will be used later
+                resolved_stream.NamespaceId = namespace_id
+                for property in resolved_stream.Type.Properties:
+                    if property.IsKey:
+                        resolved_stream.IndexId = property.Id
+
+                # Create prefix to avoid collisions
+                namespace = [n for n in namespaces if n.Id == namespace_id]
+                resolved_stream.Prefix = f'{namespace[0].Description}'
+                resolved_streams.append(resolved_stream)
+            streams_result = sds_client.Streams.getStreams(
+                namespace_id, query.get('Value'), skip=count_per_page*i, count=count_per_page)
+            i += 1
+
+    return resolved_streams
+
+
+def getWindowValuesPaged(sds_client: ADHClient, resolved_stream: CustomResolvedStream, start: str,
+                         end: str, count: int, continuation_token: str = '', value_class: type = None,
+                         filter: str = '', boundary_type: SdsBoundaryType = None, start_boundary_type: SdsBoundaryType = None,
+                         end_boundary_type: SdsBoundaryType = None) -> SdsResultPage:
+    """Helper function for calling the appropriate version of getWindowValuesPaged"""
+    if resolved_stream.CommunityId:
+        return sds_client.SharedStreams.getWindowValuesPaged(
+            resolved_stream.TenantId, resolved_stream.NamespaceId, resolved_stream.CommunityId, resolved_stream.Id, start, end, count, continuation_token, value_class, filter, boundary_type, start_boundary_type, end_boundary_type)
+    else:
+        return sds_client.Streams.getWindowValuesPaged(
+            resolved_stream.NamespaceId, resolved_stream.Id, start, end, count, continuation_token, value_class, filter, boundary_type, start_boundary_type, end_boundary_type)
+
+
+def queueStreamData(queue: Queue, resolved_stream: CustomResolvedStream, sds_client: ADHClient, start_index: str, end_index: str, start_boundary: SdsBoundaryType, test: bool):
     """Query for data from a stream and add it to the queue"""
 
     if start_index is None:
@@ -180,35 +256,27 @@ def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_
 
     new_start_index = start_index
     try:
-        if community_id:
-            results_page = sds_client.SharedStreams.getWindowValuesPaged(
-                resolved_stream.TenantId, resolved_stream.NamespaceId, community_id, resolved_stream.Id, start=start_index, end=end_index, count=250000, startBoundaryType=start_boundary, endBoundaryType=SdsBoundaryType.Exact)
-        else:
-            results_page = sds_client.Streams.getWindowValuesPaged(
-                namespace_id, resolved_stream.Id, start=start_index, end=end_index, count=250000, startBoundaryType=start_boundary, endBoundaryType=SdsBoundaryType.Exact)
+        results_page = getWindowValuesPaged(sds_client, resolved_stream, start=start_index, end=end_index,
+                                            count=250000, start_boundary_type=start_boundary, end_boundary_type=SdsBoundaryType.Exact)
 
         for result in results_page.Results:
             stream_id = f'{resolved_stream.Prefix}_{resolved_stream.Id}'
-            if result[type_index] != start_index:
+            if result[resolved_stream.IndexId] != start_index:
                 queue.put(convertData(stream_id, result))
 
         if results_page.Results != []:
-            new_start_index = results_page.Results[-1][type_index]
+            new_start_index = results_page.Results[-1][resolved_stream.IndexId]
             start_boundary = SdsBoundaryType.Inside
 
         while not results_page.end():
-            if community_id:
-                results_page = sds_client.SharedStreams.getWindowValuesPaged(
-                    resolved_stream.TenantId, resolved_stream.NamespaceId, community_id, resolved_stream.Id, start=start_index, end=end_index, count=250000, continuation_token=results_page.ContinuationToken)
-            else:
-                results_page = sds_client.Streams.getWindowValuesPaged(
-                    namespace_id, resolved_stream.Id, start=start_index, end=end_index, count=250000, continuation_token=results_page.ContinuationToken)
+            results_page = getWindowValuesPaged(sds_client, resolved_stream, start=start_index,
+                                                end=end_index, count=250000, continuation_token=results_page.ContinuationToken)
 
             for result in results_page.Results:
                 queue.put(convertData(stream_id, result))
 
             if results_page.Results != []:
-                new_start_index = results_page.Results[-1][type_index]
+                new_start_index = results_page.Results[-1][resolved_stream.IndexId]
 
     except Exception as ex:
         print((f"Encountered Error: {ex}"))
@@ -221,34 +289,25 @@ def queueStreamData(queue, resolved_stream, type_index, namespace_id, community_
     return (new_start_index, start_boundary)
 
 
-def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace_id: str, community_id: str, resolved_streams: list[SdsResolvedStream], test: bool):
+def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, resolved_streams: list[CustomResolvedStream], test: bool):
     """Task for retrieving data from Data Hub and adding it to the queue"""
 
     start_indexes = []
-    type_indexes = []
     start_boundaries = [SdsBoundaryType.Exact] * len(resolved_streams)
 
-    # Get indexes from types
-    for resolved_stream in resolved_streams:
-        for property in resolved_stream.Type.Properties:
-            if property.IsKey:
-                type_indexes.append(property.Id)
-
     # Get start indexes for each stream
-    if mode == Mode.BACKFILL_ALL:
-        for index, resolved_stream in enumerate(resolved_streams):
-            first_value = sds_client.SharedStreams.getFirstValue(resolved_stream.TenantId, resolved_stream.NamespaceId, community_id,
-                                                                 resolved_stream.Id) if community_id else sds_client.Streams.getFirstValue(namespace_id, resolved_stream.Id)
+    for resolved_stream in resolved_streams:
+        if mode == Mode.BACKFILL_ALL:
+            first_value = sds_client.SharedStreams.getFirstValue(resolved_stream.TenantId, resolved_stream.NamespaceId, resolved_stream.CommunityId,
+                                                                 resolved_stream.Id) if resolved_stream.CommunityId else sds_client.Streams.getFirstValue(resolved_stream.NamespaceId, resolved_stream.Id)
             if first_value is not None:
-                start_indexes.append(first_value[type_indexes[index]])
+                start_indexes.append(first_value[resolved_stream.IndexId])
             else:
                 start_indexes.append(None)
-    elif mode == Mode.BACKFILL_N_DAYS:
-        for resolved_stream in resolved_streams:
-            start_indexes.append((datetime.datetime.utcnow(
-            ) - datetime.timedelta(days=days_to_backfill)).isoformat() + 'Z')
-    else:
-        for resolved_stream in resolved_streams:
+        elif mode == Mode.BACKFILL_N_DAYS:
+            start_indexes.append((datetime.datetime.utcnow()
+                                  - datetime.timedelta(days=days_to_backfill)).isoformat() + 'Z')
+        else:
             start_indexes.append(
                 (datetime.datetime.utcnow()).isoformat() + 'Z')
 
@@ -258,8 +317,8 @@ def dataRetrievalTask(queue: Queue, mode: Mode, sds_client: ADHClient, namespace
 
         results = []
         with ThreadPoolExecutor() as pool:
-            results = pool.map(queueStreamData, repeat(queue), resolved_streams, type_indexes, repeat(namespace_id), repeat(community_id), repeat(
-                sds_client), start_indexes, repeat(datetime.datetime.utcnow().isoformat() + 'Z'), start_boundaries, repeat(test))
+            results = pool.map(queueStreamData, repeat(queue), resolved_streams, repeat(sds_client),
+                               start_indexes, repeat(datetime.datetime.utcnow().isoformat() + 'Z'), start_boundaries, repeat(test))
 
         for index, result in enumerate(results):
             start_indexes[index] = result[0]
@@ -301,13 +360,26 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
 
             # Send events
             sent = False
+            throttle_time = 0
+            retries = 0
             while not sent:
                 try:
                     response = pi_omf_client.omfRequest(
                         OMFMessageType.Data, OMFMessageAction.Update, consolidated_data)
-                    pi_omf_client.checkResponse(
+                    pi_omf_client.verifySuccessfulResponse(
                         response, 'Error updating data')
                     sent = True
+
+                    # Throttle if failing
+                    time.sleep(throttle_time)
+                    retries += 1
+                    throttle_time = throttle_time + 5 \
+                        if retries > retries_before_throttle and throttle_time < max_throttle_time \
+                        else throttle_time
+                    
+                    # Exit if max retries exceeded and not disabled
+                    if max_send_retries != -1 and retries > max_send_retries:
+                        break
                 except Exception as ex:
                     print((f"Encountered Error: {ex}"))
                     print
@@ -368,39 +440,9 @@ def main(test=False):
     # Collect a list of streams to transfer
     print('Collecting a list of streams to transfer...')
     resolved_streams = []
-    if community_id:
-        for query in queries:
-            streams_result = sds_client.Communities.getCommunityStreams(
-                community_id, query.get('Value'), count=100)
-            i = 1
-            while streams_result != []:
-                for stream_search_result in streams_result:
-                    resolved_stream = sds_client.SharedStreams.getResolvedStream(
-                        stream_search_result.TenantId, stream_search_result.NamespaceId, stream_search_result.CommunityId, stream_search_result.Id)
-                    resolved_stream.TenantId = stream_search_result.TenantId
-                    resolved_stream.NamespaceId = stream_search_result.NamespaceId
-                    # Create prefix to avoid collisions
-                    resolved_stream.Prefix = f'{stream_search_result.TenantName}'
-                    resolved_streams.append(resolved_stream)
-                streams_result = sds_client.Communities.getCommunityStreams(
-                    community_id, query.get('Value'), skip=100*i, count=100)
-                i += 1
-    else:
-        for query in queries:
-            streams_result = sds_client.Streams.getStreams(
-                namespace_id, query.get('Value'), count=100)
-            i = 1
-            while streams_result != []:
-                for stream in streams_result:
-                    resolved_stream = sds_client.Streams.getResolvedStream(
-                        namespace_id, stream.Id)
-                    # Create prefix to avoid collisions
-                    namespace = [n for n in namespaces if n.Id == namespace_id]
-                    resolved_stream.Prefix = f'{namespace[0].Description}'
-                    resolved_streams.append(resolved_stream)
-                streams_result = sds_client.Streams.getStreams(
-                    namespace_id, query.get('Value'), skip=100*i, count=100)
-                i += 1
+    for query in queries:
+        resolved_streams += getResolvedStreams(
+            sds_client, query, namespace_id, namespaces, community_id)
 
     resolved_streams = removeDuplicates(resolved_streams)
 
@@ -417,29 +459,32 @@ def main(test=False):
 
     response = pi_omf_client.omfRequest(
         OMFMessageType.Type, OMFMessageAction.Create, types)
-    pi_omf_client.checkResponse(response, 'Error creating types')
+    pi_omf_client.verifySuccessfulResponse(response, 'Error creating types')
 
     # Create containers
     print('Creating containers...')
     containers = []
     for resolved_stream in resolved_streams:
-        containers.append(convertContainer(resolved_stream, resolved_stream.Prefix))
+        containers.append(convertContainer(
+            resolved_stream, resolved_stream.Prefix))
 
     response = pi_omf_client.omfRequest(
         OMFMessageType.Container, OMFMessageAction.Create, containers)
-    pi_omf_client.checkResponse(response, 'Error creating containers')
+    pi_omf_client.verifySuccessfulResponse(
+        response, 'Error creating containers')
 
     # Continuously send data
     print('Sending data...')
     queue = Queue(maxsize=0)
     t1 = threading.Thread(target=dataRetrievalTask, args=(
-        queue, mode, sds_client, namespace_id, community_id, resolved_streams, test))
+        queue, mode, sds_client, resolved_streams, test))
     t2 = threading.Thread(target=dataSendingTask, args=(
         queue, pi_omf_client, test))
     t1.start()
     t2.start()
     t1.join()
     t2.join()
+
 
 if __name__ == "__main__":
     main()
