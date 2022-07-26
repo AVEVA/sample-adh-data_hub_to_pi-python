@@ -80,8 +80,7 @@ To test the sample, start by setting `Queries` in the `appsettings.json` to
 Then run
 
 ```shell
-pip install pytest
-python -m pytest test.py
+python test.py
 ```
 
 ---

@@ -108,8 +108,9 @@ class PIOMFClient(object):
             print(
                 f'{main_message}. Response: {response.status_code} {response.text}. ')
             print()
-            raise Exception(
-                f'{main_message}. Response: {response.status_code} {response.text}. ')
+            if throw_on_bad:
+                raise Exception(
+                    f'{main_message}. Response: {response.status_code} {response.text}. ')
 
     def omfRequest(self, message_type: OMFMessageType, action: OMFMessageAction, omf_message_json: dict[str, str]):
         """

@@ -31,6 +31,7 @@ days_to_backfill = 7
 max_send_retries = -1
 retries_before_throttle = 3
 max_throttle_time = 60
+throw_on_bad = True
 
 type_code_format = {
     3: None,
@@ -367,7 +368,7 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
                     response = pi_omf_client.omfRequest(
                         OMFMessageType.Data, OMFMessageAction.Update, consolidated_data)
                     pi_omf_client.verifySuccessfulResponse(
-                        response, 'Error updating data')
+                        response, 'Error updating data', throw_on_bad)
                     sent = True
 
                     # Throttle if failing
@@ -459,7 +460,7 @@ def main(test=False):
 
     response = pi_omf_client.omfRequest(
         OMFMessageType.Type, OMFMessageAction.Create, types)
-    pi_omf_client.verifySuccessfulResponse(response, 'Error creating types')
+    pi_omf_client.verifySuccessfulResponse(response, 'Error creating types', throw_on_bad)
 
     # Create containers
     print('Creating containers...')
@@ -471,7 +472,7 @@ def main(test=False):
     response = pi_omf_client.omfRequest(
         OMFMessageType.Container, OMFMessageAction.Create, containers)
     pi_omf_client.verifySuccessfulResponse(
-        response, 'Error creating containers')
+        response, 'Error creating containers', throw_on_bad)
 
     # Continuously send data
     print('Sending data...')
