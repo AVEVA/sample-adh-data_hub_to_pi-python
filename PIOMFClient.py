@@ -140,7 +140,7 @@ class PIOMFClient(object):
             print('You are not verifying the certificate of the end point. This is not advised for any system as there are security issues with doing this.')
 
         if self.__logging_enabled:
-            logging.warn(f'You are not verifying the certificate of the end point. This is not advised for any system as there are security issues with doing this.')
+            logging.warning(f'You are not verifying the certificate of the end point. This is not advised for any system as there are security issues with doing this.')
 
         msg_body = gzip.compress(bytes(json.dumps(omf_message_json), 'utf-8'))
         msg_headers = {
