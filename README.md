@@ -65,6 +65,8 @@ To run this example from the command line once the `appsettings.json` is configu
 python program.py
 ```
 
+To quit the application type `exit` in the terminal and hit `Enter` at any time after prompted.
+
 ## Running the automated test
 
 To test the sample, start by setting `Queries` in the `appsettings.json` to

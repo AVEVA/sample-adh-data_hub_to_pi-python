@@ -6,6 +6,7 @@ from queue import Queue
 from typing import Any
 import datetime
 import json
+import logging
 import threading
 import time
 import traceback
@@ -23,15 +24,18 @@ class Mode(Enum):
 
 
 # Global variables
-send_period = 30
-max_events = 5000
-data_request_period = 5
-mode = Mode.BACKFILL_N_DAYS
-days_to_backfill = 7
-max_send_retries = -1
-retries_before_throttle = 3
-max_throttle_time = 60
-throw_on_bad = True
+send_period = 30               # maximum amount of time to wait before sending the next OMF data message
+max_events = 5000              # maximum number of events to send per OMF data message
+data_request_period = 5        # number of seconds to wait before next request for data from ADH
+mode = Mode.BACKFILL_N_DAYS    # backfill mode
+days_to_backfill = 7           # number of days to backfill if mode is BACKFILL_N_DAYS
+max_send_retries = -1          # maximum number of send retries to attempt. Set to -1 for endless retries
+retries_before_throttle = 3    # number of repeat requests to attempt before throttling
+max_throttle_time = 60         # seconds to throttle for repeat requests
+throw_on_bad = True            # whether to throw an exception on a bad response
+log_file_name = 'logfile.txt'  # log file name
+#level = logging.DEBUG         # use to troubleshoot the sample
+level = logging.INFO           # use for record keeping
 
 type_code_format = {
     3: None,
@@ -95,12 +99,17 @@ def getAppsettings():
         ) as f:
             appsettings = json.load(f)
     except Exception as error:
-        print(f'Error: {str(error)}')
-        print(f'Could not open/read appsettings.json')
+        logging.ERROR(f'Error: {str(error)}')
+        logging.ERROR(f'Could not open/read appsettings.json')
         exit()
 
     return appsettings
 
+def output(level, message):
+    """Prints the given message to the console as well as the log file, with the given log level"""
+
+    logging.log(level, message)
+    print(message)
 
 def removeDuplicates(list: list[Any]):
     """Remove Duplicate entries from a list based on Ids"""
@@ -280,10 +289,8 @@ def queueStreamData(queue: Queue, resolved_stream: CustomResolvedStream, sds_cli
                 new_start_index = results_page.Results[-1][resolved_stream.IndexId]
 
     except Exception as ex:
-        print((f"Encountered Error: {ex}"))
-        print
+        logging.ERROR((f"Encountered Error: {ex}"))
         traceback.print_exc()
-        print
         if test:
             raise ex
 
@@ -382,14 +389,12 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
                     if max_send_retries != -1 and retries > max_send_retries:
                         break
                 except Exception as ex:
-                    print((f"Encountered Error: {ex}"))
-                    print
+                    logging.ERROR((f"Encountered Error: {ex}"))
                     traceback.print_exc()
-                    print
                     if test:
                         raise ex
 
-            print(
+            logging.debug(
                 f'Queue size: {queue.qsize()}, Events/second: {event_count/(time.time()-timer)}')
 
             # Reset timer
@@ -397,34 +402,37 @@ def dataSendingTask(queue: Queue, pi_omf_client: PIOMFClient, test: bool):
 
 
 def main(test=False):
-    print('Starting!')
+
+    output(logging.INFO, 'Starting!')
 
     # Read appsettings
-    print('Reading appsettings...')
+    output(logging.INFO, 'Reading appsettings...')
     appsettings = getAppsettings()
     data_hub_appsettings = appsettings.get('DataHub')
     pi_appsettings = appsettings.get('PI')
     queries = appsettings.get('Queries')
 
     # Create PI OMF client
-    print('Creating a PI OMF client...')
+    output(logging.INFO, 'Creating a PI OMF client...')
     pi_omf_client = PIOMFClient(
         pi_appsettings.get('Resource'),
         pi_appsettings.get('DataArchiveName'),
         pi_appsettings.get('Username'),
         pi_appsettings.get('Password'),
         pi_appsettings.get('OMFVersion', '1.2'),
-        pi_appsettings.get('VerifySSL', True)
+        pi_appsettings.get('VerifySSL', True),
+        logging_enabled=True
     )
 
     # Create a Data Hub client
-    print('Creating a Data Hub client...')
+    output(logging.INFO, 'Creating a Data Hub client...')
     sds_client = ADHClient(
         data_hub_appsettings.get('ApiVersion'),
         data_hub_appsettings.get('TenantId'),
         data_hub_appsettings.get('Resource'),
         data_hub_appsettings.get('ClientId'),
-        data_hub_appsettings.get('ClientSecret'))
+        data_hub_appsettings.get('ClientSecret'),
+        logging_enabled=True)
     namespace_id = data_hub_appsettings.get('NamespaceId')
     community_id = data_hub_appsettings.get('CommunityId')
 
@@ -439,7 +447,7 @@ def main(test=False):
     removeDuplicates(tenants)
 
     # Collect a list of streams to transfer
-    print('Collecting a list of streams to transfer...')
+    output(logging.INFO, 'Collecting a list of streams to transfer...')
     resolved_streams = []
     for query in queries:
         resolved_streams += getResolvedStreams(
@@ -448,8 +456,7 @@ def main(test=False):
     resolved_streams = removeDuplicates(resolved_streams)
 
     # Create types if they do not exist
-    print('Creating types...')
-
+    output(logging.INFO, 'Creating types...')
     types = []
     type_id_set = set()
     for resolved_stream in resolved_streams:
@@ -463,7 +470,7 @@ def main(test=False):
     pi_omf_client.verifySuccessfulResponse(response, 'Error creating types', throw_on_bad)
 
     # Create containers
-    print('Creating containers...')
+    output(logging.INFO, 'Creating containers...')
     containers = []
     for resolved_stream in resolved_streams:
         containers.append(convertContainer(
@@ -475,17 +482,23 @@ def main(test=False):
         response, 'Error creating containers', throw_on_bad)
 
     # Continuously send data
-    print('Sending data...')
+    output(logging.INFO, 'Sending data...')
     queue = Queue(maxsize=0)
     t1 = threading.Thread(target=dataRetrievalTask, args=(
-        queue, mode, sds_client, resolved_streams, test))
+        queue, mode, sds_client, resolved_streams, test), daemon=True)
     t2 = threading.Thread(target=dataSendingTask, args=(
-        queue, pi_omf_client, test))
+        queue, pi_omf_client, test), daemon=True)
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+
+    while t1.is_alive() and t2.is_alive():
+        if not test and input('Type "exit" to quit application: ').casefold() == 'exit':
+            break
 
 
 if __name__ == "__main__":
+
+    # Set up the logger
+    logging.basicConfig(filename=log_file_name, encoding='utf-8', level=level, datefmt='%Y-%m-%d %H:%M:%S', format= '%(asctime)s %(module)16s,line: %(lineno)4d %(levelname)8s | %(message)s')
+    
     main()

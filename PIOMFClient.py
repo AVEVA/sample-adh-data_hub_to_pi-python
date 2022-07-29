@@ -1,5 +1,6 @@
 from __future__ import annotations
 from enum import Enum
+import logging
 import requests
 import json
 import gzip
@@ -27,13 +28,14 @@ class PIOMFClient(object):
     """Handles communication with PI OMF Endpoint."""
 
     def __init__(self, url: str, data_archive: str, username: str,
-                 password: str, omf_version: str = '1.2', verify_ssl: bool = True):
+                 password: str, omf_version: str = '1.2', verify_ssl: bool = True, logging_enabled: bool = False):
         self.__url = url
         self.__data_archive = data_archive
         self.__username = username
         self.__password = password
         self.__omf_version = omf_version
         self.__verify_ssl = verify_ssl
+        self.__logging_enabled = logging_enabled
 
         self.__omf_endpoint = f'{url}/omf'
         self.__session = requests.Session()
@@ -87,6 +89,18 @@ class PIOMFClient(object):
         return self.__verify_ssl
 
     @property
+    def LoggingEnabled(self) -> bool:
+        """
+        Whether logging is enabled (default False)
+        :return:
+        """
+        return self.LoggingEnabled    
+    
+    @LoggingEnabled.setter
+    def logging_enabled(self, value: bool):
+        self.LoggingEnabled = value
+
+    @property
     def OMFEndpoint(self) -> str:
         """
         Gets the omf endpoint
@@ -105,9 +119,10 @@ class PIOMFClient(object):
         # response code in 200s if the request was successful!
         if response.status_code < 200 or response.status_code >= 300:
             response.close()
-            print(
-                f'{main_message}. Response: {response.status_code} {response.text}. ')
-            print()
+            if self.__logging_enabled:
+                logging.info(f'request executed in {response.elapsed.microseconds / 1000}ms - status code: {response.status_code}')
+                logging.debug(f'{main_message}. Response: {response.status_code} {response.text}.')
+
             if throw_on_bad:
                 raise Exception(
                     f'{main_message}. Response: {response.status_code} {response.text}. ')
@@ -123,6 +138,9 @@ class PIOMFClient(object):
 
         if not self.VerifySSL:
             print('You are not verifying the certificate of the end point. This is not advised for any system as there are security issues with doing this.')
+
+        if self.__logging_enabled:
+            logging.warn(f'You are not verifying the certificate of the end point. This is not advised for any system as there are security issues with doing this.')
 
         msg_body = gzip.compress(bytes(json.dumps(omf_message_json), 'utf-8'))
         msg_headers = {
