@@ -1,0 +1,97 @@
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+schedules:
+  - cron: '0 0 * * 0'
+    displayName: Weekly build
+    branches:
+      include:
+        - main
+    always: true
+
+resources:
+  repositories:
+    - repository: OpsGuildAutomationRepo
+      type: git
+      name: Engineering/OpsGuild.Automation
+      ref: refs/heads/main
+    - repository: templates
+      type: github
+      name: osisoft/OSI-Samples
+      endpoint: osisoft/OSI-Samples
+
+variables:
+  - template: '/miscellaneous/build_templates/variables.yml@templates'
+  - name: analysisProject
+    value: sample-adh-data_hub_to_pi-python
+
+jobs:
+  - job: Tests
+    strategy:
+      maxParallel: 1
+      matrix:
+        linux:
+          agentOS: Linux
+        windows:
+          agentOS: Windows_NT
+    pool:
+      name: 00-OSIManaged-Containers
+      demands: Agent.OS -equals $(agentOS)
+    variables:
+      - name: DataHub.TenantId
+        value: $(TenantId)
+      - name: DataHub.NamespaceId
+        value: $(NamespaceId)
+      - name: DataHub.ClientId
+        value: $(ClientId)
+      - name: DataHub.ClientSecret
+        value: $(ClientSecret)
+      - name: DataHub.Resource
+        value: $(Resource)
+      - name: PI.Resource
+        value: $(PIWebAPI)
+      - name: PI.Username
+        value: $(Username)
+      - name: PI.Password
+        value: $(Password)
+      - name: PI.VerifySSL
+        value: false
+      - name: Queries.0.Value
+        value: 'Id:DataHubToPIStream'
+      - name: Queries.1.Value
+        value: 'Id:TestNeverMatch'
+
+    steps:
+      - template: '/miscellaneous/build_templates/appsettings.yml@templates'
+        parameters:
+          secrets: 'TenantId, NamespaceId, ClientId, ClientSecret, Resource, Username, Password, PIWebAPI'
+
+      - script: |
+          echo Install test tools  
+          pip install pytest
+          echo Install requirements
+          pip install -r requirements.txt
+          echo Run tests
+          python -m pytest --junitxml=junit/test-results.xml ./test.py
+          echo Complete
+        displayName: 'Run tests'
+
+      - task: PublishTestResults@2
+        inputs:
+          testResultsFiles: '**/test-*.xml'
+          failTaskOnFailedTests: true
+          testRunTitle: '$(Agent.JobName) on $(Agent.OS)'
+        displayName: 'Publish test results'
+        condition: always()
+
+  - template: '/miscellaneous/build_templates/code-analysis.yml@templates'
+    parameters:
+      useRequirementsTxt: true
