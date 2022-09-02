@@ -1,6 +1,6 @@
 # AVEVA Data Hub to PI Data Archive Python Sample
 
-**Version:** 1.0.2
+**Version:** 1.0.3
 
 [![Build Status](https://dev.azure.com/osieng/engineering/_apis/build/status/product-readiness/ADH/osisoft.sample-adh-data_hub_to_pi-python?repoName=osisoft%2Fsample-adh-data_hub_to_pi-python&branchName=main)](https://dev.azure.com/osieng/engineering/_build/latest?definitionId=4874&repoName=osisoft%2Fsample-adh-data_hub_to_pi-python&branchName=main)
 
