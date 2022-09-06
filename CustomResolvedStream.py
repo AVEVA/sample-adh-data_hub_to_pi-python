@@ -108,7 +108,7 @@ class CustomResolvedStream(SdsResolvedStream, object):
             result['CommunityId'] = self.CommunityId
 
         if self.IndexId is not None:
-            result['TenantId'] = self.IndexId
+            result['IndexId'] = self.IndexId
 
         return result
 

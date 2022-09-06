@@ -1,5 +1,9 @@
 # Version History
 
+## 1.0.3 / 2022-09-02
+
+- Resolve copy-paste issue flagged by Polaris
+
 ## 1.0.2 / 2022-08-17
 
 - Automate dependabot approval and automerge
