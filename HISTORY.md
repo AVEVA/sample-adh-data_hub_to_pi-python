@@ -1,5 +1,9 @@
 # Version History
 
+## 1.0.4 / 2023-10-13
+
+- Migrate Pipelines
+
 ## 1.0.3 / 2022-09-02
 
 - Resolve copy-paste issue flagged by Polaris
