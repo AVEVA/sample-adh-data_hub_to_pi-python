@@ -20,7 +20,7 @@ class SampleE2ETests(unittest.TestCase):
         cleanup_test_environment()
 
 
-test_adh_type = {
+test_cds_type = {
     "Id": "DataHubToPIType",
     "Name": "DataHubToPIType",
     "SdsTypeCode": 1,
@@ -45,7 +45,7 @@ test_adh_type = {
     ]
 }
 
-test_adh_stream = {
+test_cds_stream = {
     "TypeId": "DataHubToPIType",
     "Id": "DataHubToPIStream",
     "Name": "DataHubToPIStream"
@@ -71,7 +71,7 @@ def create_test_environment():
     appsettings = getAppsettings()
     data_hub_appsettings = appsettings.get('DataHub')
 
-    # Create an ADH client
+    # Create an Cds client
     sds_client = ADHClient(
         data_hub_appsettings.get('ApiVersion'),
         data_hub_appsettings.get('TenantId'),
@@ -82,11 +82,11 @@ def create_test_environment():
 
     # Create a type
     sds_client.Types.getOrCreateType(
-        namespace_id, SdsType.fromJson(test_adh_type))
+        namespace_id, SdsType.fromJson(test_cds_type))
 
     # Create a stream
     sds_client.Streams.getOrCreateStream(
-        namespace_id, SdsStream.fromJson(test_adh_stream))
+        namespace_id, SdsStream.fromJson(test_cds_stream))
 
     # Add test data
     data = []
@@ -97,7 +97,7 @@ def create_test_environment():
             'Value': 100*random.random()
         })
     sds_client.Streams.updateValues(
-        namespace_id, test_adh_stream.get('Id'), json.dumps(data))
+        namespace_id, test_cds_stream.get('Id'), json.dumps(data))
 
     print('Environment Created!')
 
@@ -109,7 +109,7 @@ def cleanup_test_environment():
     data_hub_appsettings = appsettings.get('DataHub')
     pi_appsettings = appsettings.get('PI')
 
-    # Create an ADH client
+    # Create an Cds client
     sds_client = ADHClient(
         data_hub_appsettings.get('ApiVersion'),
         data_hub_appsettings.get('TenantId'),
@@ -133,23 +133,23 @@ def cleanup_test_environment():
     namespace = [n for n in namespaces if n.Id == namespace_id]
     prefix = f'{namespace[0].Description}'
 
-    # Cleanup ADH stream
+    # Cleanup Cds stream
     suppress_error(lambda: sds_client.Streams.deleteStream(
-        namespace_id, test_adh_stream.get('Id')))
+        namespace_id, test_cds_stream.get('Id')))
 
-    # Cleanup ADH type
+    # Cleanup Cds type
     suppress_error(lambda: sds_client.Types.deleteType(
-        namespace_id, test_adh_type.get('Id')))
+        namespace_id, test_cds_type.get('Id')))
 
     # Cleanup OMF container
-    resolved_stream = SdsStream.fromJson(test_adh_stream)
-    resolved_stream.Type = SdsType.fromJson(test_adh_type)
+    resolved_stream = SdsStream.fromJson(test_cds_stream)
+    resolved_stream.Type = SdsType.fromJson(test_cds_type)
     suppress_error(lambda: pi_omf_client.omfRequest(OMFMessageType.Container, OMFMessageAction.Delete, [
                    convertContainer(resolved_stream, prefix)]))
 
     # Cleanup OMF type
     suppress_error(lambda: pi_omf_client.omfRequest(OMFMessageType.Type, OMFMessageAction.Delete, [
-                   convertType(SdsType.fromJson(test_adh_type), prefix)]))
+                   convertType(SdsType.fromJson(test_cds_type), prefix)]))
 
 
 if __name__ == '__main__':

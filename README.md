@@ -1,22 +1,22 @@
-# AVEVA Data Hub to PI Data Archive Python Sample
+# CONNECT data services to PI Data Archive Python Sample
 
 **Version:** 1.0.4
 
-[![Build Status](https://dev.azure.com/osieng/engineering/_apis/build/status/product-readiness/ADH/osisoft.sample-adh-data_hub_to_pi-python?repoName=osisoft%2Fsample-adh-data_hub_to_pi-python&branchName=main)](https://dev.azure.com/osieng/engineering/_build/latest?definitionId=4874&repoName=osisoft%2Fsample-adh-data_hub_to_pi-python&branchName=main)
+[![Build Status](https://dev.azure.com/AVEVA-VSTS/Cloud%20Platform/_apis/build/status%2Fproduct-readiness%2FADH%2FAVEVA.sample-adh-data_hub_to_pi-python?repoName=AVEVA%2Fsample-adh-data_hub_to_pi-python&branchName=main)](https://dev.azure.com/AVEVA-VSTS/Cloud%20Platform/_build/latest?definitionId=16200&repoName=AVEVA%2Fsample-adh-data_hub_to_pi-python&branchName=main)
 
 Developed against Python 3.9.1.
 
 ## Requirements
 
 - Python 3.7+
-- Register a [Client-Credentials Client](https://datahub.connect.aveva.com/clients) in your AVEVA Data Hub tenant and create a client secret to use in the configuration of this sample. ([Video Walkthrough](https://www.youtube.com/watch?v=JPWy0ZX9niU))
+- Register a [Client-Credentials Client](https://datahub.connect.aveva.com/clients) in your CONNECT data services tenant and create a client secret to use in the configuration of this sample. ([Video Walkthrough](https://www.youtube.com/watch?v=JPWy0ZX9niU))
   - Note: the client only needs role with read permissions to the specified streams.
 - Install required modules: `pip install -r requirements.txt`
 - Requires the PI Web API and that the default server of the PI Web API is the desired server to send to.
 
 ## About this sample
 
-This sample uses REST API calls to the Sequential Data Store of AVEVA Data Hub to collect Types, Streams, and data and create corresponding PI Tags in a Data Archive. The sample uses the architecture outlined below where data is fed into a queue from a data retrieval task and events are read from the queue by the send task to be sent to the PI Data Archive. Within the retrieval task, individual threads are spun up to parallelize data retrieval, improving performance. Within the send task, data is batched together from any number of streams and sent when there are more than 5000 events to be sent or more than 30 seconds has elapsed. This ensures that data is sent in order and is more performant than continuously sending data.
+This sample uses REST API calls to the Sequential Data Store of CONNECT data services to collect Types, Streams, and data and create corresponding PI Tags in a Data Archive. The sample uses the architecture outlined below where data is fed into a queue from a data retrieval task and events are read from the queue by the send task to be sent to the PI Data Archive. Within the retrieval task, individual threads are spun up to parallelize data retrieval, improving performance. Within the send task, data is batched together from any number of streams and sent when there are more than 5000 events to be sent or more than 30 seconds has elapsed. This ensures that data is sent in order and is more performant than continuously sending data.
 
 ![Architecture Diagram](images/data_hub_to_pi_architecture.png)
 
@@ -28,12 +28,12 @@ There are some PI Point settings that cannot be configured programatically throu
 
 ### Configuring appsettings.json
 
-AVEVA Data Hub is secured by obtaining tokens from its identity endpoint. Client-credentials clients provide a client application identifier and an associated secret (or key) that are authenticated against the token endpoint. You must replace the placeholders in your `appsettings.json` file with the authentication-related values from your tenant and a client-credentials client created in your ADH tenant.
+CONNECT data services is secured by obtaining tokens from its identity endpoint. Client-credentials clients provide a client application identifier and an associated secret (or key) that are authenticated against the token endpoint. You must replace the placeholders in your `appsettings.json` file with the authentication-related values from your tenant and a client-credentials client created in your Cds tenant.
 
 ```json
 {
   "DataHub": {
-    "Resource": "https://uswe.datahub.connect.aveva.com",              # This is the base ADH URL being used
+    "Resource": "https://uswe.datahub.connect.aveva.com",              # This is the base Cds URL being used
     "ApiVersion": "v1",                                                # The API version
     "TenantId": "PLACEHOLDER_REPLACE_WITH_TENANT_ID",                  # The Tenant Id of the Tenant that is being read from
     "NamespaceId": "PLACEHOLDER_REPLACE_WITH_NAMESPACE_ID",            # The ID of the Namespace that is being read from
@@ -91,5 +91,5 @@ python test.py
 
 Tested against Python 3.9.1
 
-For the main ADH samples page [ReadMe](https://github.com/osisoft/OSI-Samples-OCS)  
-For the main AVEVA samples page [ReadMe](https://github.com/osisoft/OSI-Samples)
+For the main Cds samples page [ReadMe](https://github.com/AVEVA/AVEVA-Samples-CloudOperations)  
+For the main AVEVA samples page [ReadMe](https://github.com/AVEVA/AVEVA-Samples)

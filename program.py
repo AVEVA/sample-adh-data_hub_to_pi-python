@@ -26,7 +26,7 @@ class Mode(Enum):
 # Global variables
 send_period = 30               # maximum amount of time to wait before sending the next OMF data message
 max_events = 5000              # maximum number of events to send per OMF data message
-data_request_period = 5        # number of seconds to wait before next request for data from ADH
+data_request_period = 5        # number of seconds to wait before next request for data from Cds
 mode = Mode.BACKFILL_N_DAYS    # backfill mode
 days_to_backfill = 7           # number of days to backfill if mode is BACKFILL_N_DAYS
 max_send_retries = -1          # maximum number of send retries to attempt. Set to -1 for endless retries
